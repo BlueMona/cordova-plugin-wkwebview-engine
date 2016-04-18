@@ -29,7 +29,7 @@
     <license>Apache 2.0</license>
     <keywords>cordova,wkwebview,webview</keywords>
     <repo>https://git-wip-us.apache.org/repos/asf/cordova-plugin-wkwebview-engine.git</repo>
-
+    <preference name="WKWEBVIEW_SERVER_PORT" default="21234" />
 	<engines>
         <engine name="cordova-ios" version=">=4.0.0-dev" />
         <engine name="apple-ios" version=">=9.0" />
@@ -40,6 +40,7 @@
         <js-module src="src/www/ios/ios-wkwebview-exec.js" name="ios-wkwebview-exec">
             <clobbers target="cordova.exec" />
         </js-module>
+        <!-- you also need to allow-intent in main config.xml for this to work -->
         <config-file target="*-Info.plist" parent="NSAppTransportSecurity/NSExceptionDomains">
             <dict>
                 <key>localhost</key>
@@ -68,5 +69,4 @@
 
         <dependency id="cordova-plugin-webserver" />
     </platform>
-
 </plugin>

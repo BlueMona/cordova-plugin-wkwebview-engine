@@ -46,6 +46,7 @@
 GCDWebServer* _webServer;
 NSMutableDictionary* _webServerOptions;
 NSString* appDataFolder;
+NSString *const StartUrlConstant = @"index.html";
 NSString *const FileSchemaConstant = @"file://";
 NSString *const ServerCreatedNotificationName = @"WKWebView.WebServer.Created";
 NSString *const SessionHeader = @"X-Session";
@@ -143,7 +144,7 @@ WKWebView* wkWebView = nil;
 - (void) initWebServer:(BOOL) startWebServer {
     /* generating a random session key */
     if(sessionKey == nil) {
-      sessionKey = [self uuidString];
+        sessionKey = [self uuidString];
     }
 
     appDataFolder = [[NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) objectAtIndex:0] stringByDeletingLastPathComponent];
@@ -151,10 +152,9 @@ WKWebView* wkWebView = nil;
     // Note: the embedded webserver is still needed for iOS 9. It's not needed to load index.html,
     //       but we need it to ajax-load files (file:// protocol has no origin, leading to CORS issues).
   
-    NSURL* startURL = [NSURL URLWithString:@"index.html"];
+    NSURL* startURL = [NSURL URLWithString:StartUrlConstant];
     NSString* startFilePath = [self pathForResource:[startURL path]];
     NSString *directoryPath = [startFilePath stringByDeletingLastPathComponent];
-    //@"/www/"; //myMainViewController.wwwFolderName;
 
     // don't restart the webserver if we don't have to (fi. after a crash, see #223)
     if (_webServer != nil && [_webServer isRunning]) {
@@ -166,11 +166,6 @@ WKWebView* wkWebView = nil;
     _webServerOptions = [NSMutableDictionary dictionary];
 
     // Add GET handler for local "www/" directory
-    /* [_webServer addGETHandlerForBasePath:@"/"
-                           directoryPath:directoryPath
-                           indexFilename:nil
-                                cacheAge:30
-                      allowRangeRequests:YES]; */
     [self addHandlerForBasePath:@"/"
                            directoryPath:directoryPath
                            indexFilename:@"index.html"];
@@ -181,11 +176,7 @@ WKWebView* wkWebView = nil;
     // Initialize Server startup
     if (startWebServer) {
         [self startServer];
-//      [myMainViewController copyLS:_webServer.port];
     }
-
-    // Update Swizzled ViewController with port currently used by local Server
-//      [myMainViewController setServerPort:_webServer.port];
 }
 
 - (GCDWebServerResponse*)accessForbidden {
@@ -513,11 +504,12 @@ WKWebView* wkWebView = nil;
 - (void) webView: (WKWebView *) webView decidePolicyForNavigationAction: (WKNavigationAction*) navigationAction decisionHandler: (void (^)(WKNavigationActionPolicy)) decisionHandler
 {
     NSURL* url = [navigationAction.request URL];
-    NSString* localAddress = [NSString stringWithFormat:@"http://localhost:%d/index.html", httpPort];
-    if([url.absoluteString containsString:localAddress]) {
+    NSString* localAddress = [NSString stringWithFormat:@"http://localhost:%d/%@", httpPort, StartUrlConstant];
+    if([url.absoluteString isEqualToString:localAddress]) {
         return decisionHandler(YES);
     }
-    if([url.path containsString:@"redirect.html"]) {
+    // redirect when we load the start page
+    if([url.path containsString:StartUrlConstant]) {
         url = [NSURL URLWithString:localAddress];
         [wkWebView loadRequest:[NSURLRequest requestWithURL:url]];
         return decisionHandler(NO);
