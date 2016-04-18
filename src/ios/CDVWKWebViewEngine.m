@@ -20,6 +20,9 @@
 #import "CDVWKWebViewEngine.h"
 #import "CDVWKWebViewUIDelegate.h"
 #import <Cordova/NSDictionary+CordovaPreferences.h>
+#import <GCDWebServer/GCDWebServer.h>
+#import <GCDWebServer/GCDWebServerPrivate.h>
+#import <GCDWebServer/GCDWebServerDataResponse.h>
 
 #import <objc/message.h>
 
@@ -40,13 +43,27 @@
 
 @synthesize engineWebView = _engineWebView;
 
+GCDWebServer* _webServer;
+NSMutableDictionary* _webServerOptions;
+NSString* appDataFolder;
+NSString *const FileSchemaConstant = @"file://";
+NSString *const ServerCreatedNotificationName = @"WKWebView.WebServer.Created";
+NSString *const SessionHeader = @"X-Session";
+NSString *const SessionCookie = @"peerioxsession";
+NSString* sessionKey = nil;
+
 - (instancetype)initWithFrame:(CGRect)frame
 {
     self = [super init];
     if (self) {
         if (NSClassFromString(@"WKWebView") == nil) {
+            NSLog(@"WkWebview not supported");
             return nil;
         }
+      
+        NSLog(@"Creating server, if not already created");
+        [self initWebServer:true];
+      
         self.uiDelegate = [[CDVWKWebViewUIDelegate alloc] initWithTitle:[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleDisplayName"]];
 
         WKUserContentController* userContentController = [[WKUserContentController alloc] init];
@@ -60,6 +77,7 @@
         wkWebView.UIDelegate = self.uiDelegate;
 
         self.engineWebView = wkWebView;
+      
 
         NSLog(@"Using WKWebView");
     }
@@ -90,6 +108,162 @@
     [self updateSettings:self.commandDelegate.settings];
 }
 
+- (NSString *)uuidString {
+    // Returns a UUID
+
+    CFUUIDRef uuid = CFUUIDCreate(kCFAllocatorDefault);
+    NSString *uuidString = (__bridge_transfer NSString *)CFUUIDCreateString(kCFAllocatorDefault, uuid);
+    CFRelease(uuid);
+
+    return uuidString;
+}
+
+- (NSString*)pathForResource:(NSString*)resourcepath
+{
+    NSBundle* mainBundle = [NSBundle mainBundle];
+    NSMutableArray* directoryParts = [NSMutableArray arrayWithArray:[resourcepath componentsSeparatedByString:@"/"]];
+    NSString* filename = [directoryParts lastObject];
+
+    [directoryParts removeLastObject];
+
+    NSString* directoryPartsJoined = [directoryParts componentsJoinedByString:@"/"];
+    NSString* directoryStr = @"www";
+
+    if ([directoryPartsJoined length] > 0) {
+        directoryStr = [NSString stringWithFormat:@"%@/%@", @"www", [directoryParts componentsJoinedByString:@"/"]];
+    }
+
+    return [mainBundle pathForResource:filename ofType:@"" inDirectory:directoryStr];
+}
+
+- (void) initWebServer:(BOOL) startWebServer {
+    /* generating a random session key */
+    if(sessionKey == nil) {
+      sessionKey = [self uuidString];
+    }
+
+    appDataFolder = [[NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) objectAtIndex:0] stringByDeletingLastPathComponent];
+
+    // Note: the embedded webserver is still needed for iOS 9. It's not needed to load index.html,
+    //       but we need it to ajax-load files (file:// protocol has no origin, leading to CORS issues).
+  
+    NSURL* startURL = [NSURL URLWithString:@"index.html"];
+    NSString* startFilePath = [self pathForResource:[startURL path]];
+    NSString *directoryPath = [startFilePath stringByDeletingLastPathComponent];
+    //@"/www/"; //myMainViewController.wwwFolderName;
+
+    // don't restart the webserver if we don't have to (fi. after a crash, see #223)
+    if (_webServer != nil && [_webServer isRunning]) {
+//        [myMainViewController setServerPort:_webServer.port];
+        return;
+    }
+
+    _webServer = [[GCDWebServer alloc] init];
+    _webServerOptions = [NSMutableDictionary dictionary];
+
+    // Add GET handler for local "www/" directory
+    /* [_webServer addGETHandlerForBasePath:@"/"
+                           directoryPath:directoryPath
+                           indexFilename:nil
+                                cacheAge:30
+                      allowRangeRequests:YES]; */
+    [self addHandlerForBasePath:@"/"
+                           directoryPath:directoryPath
+                           indexFilename:@"index.html"];
+    [self addHandlerForPath:@"/Library/"];
+    [self addHandlerForPath:@"/Documents/"];
+    [self addHandlerForPath:@"/tmp/"];
+
+    // Initialize Server startup
+    if (startWebServer) {
+        [self startServer];
+//      [myMainViewController copyLS:_webServer.port];
+    }
+
+    // Update Swizzled ViewController with port currently used by local Server
+//      [myMainViewController setServerPort:_webServer.port];
+}
+
+- (GCDWebServerResponse*)accessForbidden {
+  return [GCDWebServerDataResponse responseWithHTML:@"Access Forbidden"];
+}
+
+- (BOOL)checkSessionKey:(GCDWebServerRequest*) request {
+    if([request.headers objectForKey:SessionHeader]) {
+        NSString* userSessionKey = request.headers[SessionHeader];
+        return [sessionKey isEqualToString:userSessionKey];
+    }
+    if([request.headers objectForKey:@"Cookie"]) {
+        NSString* userCookie = request.headers[@"Cookie"];
+        return [userCookie containsString:sessionKey];
+    }
+    return false;
+}
+
+- (NSString*)formatForeverCookieHeader:(NSString*) name
+                  value:(NSString*) value {
+    return [NSString stringWithFormat:@"%@=%@; path=/;", name, value];
+}
+
+- (void)addHandlerForBasePath:(NSString *) path
+                directoryPath:(NSString *) directoryPath
+                indexFilename:(NSString *) indexFilename {
+    [_webServer addHandlerForMethod:@"GET"
+                pathRegex: [NSString stringWithFormat:@"^%@.*", path]
+                requestClass:[GCDWebServerRequest class]
+                processBlock:^GCDWebServerResponse *(GCDWebServerRequest* request) {
+                  
+                  NSString *fileLocation = request.URL.path;
+                  
+                  if ([fileLocation hasPrefix:path]) {
+                      fileLocation = [directoryPath stringByAppendingString:request.URL.path];
+                  }
+                  
+                  fileLocation = [fileLocation stringByReplacingOccurrencesOfString:FileSchemaConstant withString:@""];
+                  if (![[NSFileManager defaultManager] fileExistsAtPath:fileLocation]) {
+                      GCDWebServerResponse* emptyResponse = [GCDWebServerResponse responseWithStatusCode:404];
+                      return emptyResponse;
+                  }
+                  
+                  GCDWebServerResponse* response = [GCDWebServerFileResponse responseWithFile:fileLocation byteRange:request.byteRange];
+                  [response setValue:@"bytes" forAdditionalHeader:@"Accept-Ranges"];
+                  if([self checkSessionKey:request]) {
+                      [response setValue:[self formatForeverCookieHeader:SessionCookie value:sessionKey]
+                      forAdditionalHeader: @"Set-Cookie"];
+                  }
+                  return response;
+                }
+     ];
+}
+
+- (void)addHandlerForPath:(NSString *) path {
+  [_webServer addHandlerForMethod:@"GET"
+                     pathRegex: [NSString stringWithFormat:@"^%@.*", path]
+                     requestClass:[GCDWebServerRequest class]
+                     processBlock:^GCDWebServerResponse *(GCDWebServerRequest* request) {
+                       /* testing for our session key */
+                       // if(![self checkSessionKey:request]) return [self accessForbidden];
+
+                       NSString *fileLocation = request.URL.path;
+
+                       if ([fileLocation hasPrefix:path]) {
+                         fileLocation = [appDataFolder stringByAppendingString:request.URL.path];
+                       }
+
+                       fileLocation = [fileLocation stringByReplacingOccurrencesOfString:FileSchemaConstant withString:@""];
+                       if (![[NSFileManager defaultManager] fileExistsAtPath:fileLocation]) {
+                           return nil;
+                       }
+
+                       GCDWebServerResponse* response = [GCDWebServerFileResponse responseWithFile:fileLocation byteRange:request.byteRange];
+                       [response setValue:@"bytes" forAdditionalHeader:@"Accept-Ranges"];
+                       [response setValue:[self formatForeverCookieHeader:SessionCookie value:sessionKey]
+                         forAdditionalHeader: @"Set-Cookie"];
+                       return response;
+                     }
+   ];
+}
+
 - (id)loadRequest:(NSURLRequest*)request
 {
     if ([self canLoadRequest:request]) { // can load, differentiate between file urls and other schemes
@@ -114,6 +288,52 @@
                                ];
         return [self loadHTMLString:errorHtml baseURL:nil];
     }
+}
+
+- (void)startServer
+{
+    NSError *error = nil;
+
+    // Enable this option to force the Server also to run when suspended
+    // [_webServerOptions setObject:[NSNumber numberWithBool:NO] forKey:GCDWebServerOption_AutomaticallySuspendInBackground];
+
+    [_webServerOptions setObject:[NSNumber numberWithBool:YES]
+                          forKey:GCDWebServerOption_BindToLocalhost];
+
+    // If a fixed port is passed in, use that one, otherwise use 12344.
+    // If the port is taken though, look for a free port by adding 1 to the port until we find one.
+    int httpPort = 12344;
+
+    // first we check any passed-in variable during plugin install (which is copied to plist, see plugin.xml)
+    NSNumber *plistPort = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"WKWebViewPluginEmbeddedServerPort"];
+    if (plistPort != nil) {
+      httpPort = [plistPort intValue];
+    }
+
+    // now check if it was set in config.xml - this one wins if set.
+    // (note that the settings can be in any casing, but they are stored in lowercase)
+    //if ([self.viewController.settings objectForKey:@"wkwebviewpluginembeddedserverport"]) {
+    //  httpPort = [[self.viewController.settings objectForKey:@"wkwebviewpluginembeddedserverport"] intValue];
+    //}
+
+    _webServer.delegate = (id<GCDWebServerDelegate>)self;
+    do {
+        [_webServerOptions setObject:[NSNumber numberWithInteger:httpPort++]
+                              forKey:GCDWebServerOption_Port];
+    } while(![_webServer startWithOptions:_webServerOptions error:&error]);
+
+    if (error) {
+        NSLog(@"Error starting http daemon: %@", error);
+    } else {
+        [GCDWebServer setLogLevel:kGCDWebServerLoggingLevel_Warning];
+        NSLog(@"Started http daemon: %@ ", _webServer.serverURL);
+    }
+}
+
+//MARK:GCDWebServerDelegate
+- (void)webServerDidStart:(GCDWebServer*)server {
+    [NSNotificationCenter.defaultCenter postNotificationName:ServerCreatedNotificationName
+                                                      object: @[self.viewController, _webServer]];
 }
 
 - (id)loadHTMLString:(NSString*)string baseURL:(NSURL*)baseURL

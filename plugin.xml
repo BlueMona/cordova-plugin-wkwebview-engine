@@ -40,7 +40,19 @@
         <js-module src="src/www/ios/ios-wkwebview-exec.js" name="ios-wkwebview-exec">
             <clobbers target="cordova.exec" />
         </js-module>
+        <config-file target="*-Info.plist" parent="NSAppTransportSecurity">
+            <dict>
+                <key>localhost</key>
+                <dict>
+                    <key>NSTemporaryExceptionAllowsInsecureHTTPLoads</key>
+                    <true/>
+                </dict>
+            </dict>
+        </config-file>
 
+        <config-file target="*-Info.plist" parent="WKWebViewPluginEmbeddedServerPort">
+            <string>$WKWEBVIEW_SERVER_PORT</string>
+        </config-file>
         <config-file target="config.xml" parent="/*">
             <feature name="CDVWKWebViewEngine">
                 <param name="ios-package" value="CDVWKWebViewEngine" />
@@ -55,6 +67,7 @@
         <header-file src="src/ios/CDVWKWebViewUIDelegate.h" />
         <source-file src="src/ios/CDVWKWebViewUIDelegate.m" />
 
+        <dependency id="cordova-plugin-webserver" />
     </platform>
 
 </plugin>
