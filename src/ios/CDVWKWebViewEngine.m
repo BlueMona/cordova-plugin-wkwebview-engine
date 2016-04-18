@@ -51,6 +51,10 @@ NSString *const ServerCreatedNotificationName = @"WKWebView.WebServer.Created";
 NSString *const SessionHeader = @"X-Session";
 NSString *const SessionCookie = @"peerioxsession";
 NSString* sessionKey = nil;
+// If a fixed port is passed in, use that one, otherwise use 12344.
+// If the port is taken though, look for a free port by adding 1 to the port until we find one.
+int httpPort = 12344;
+WKWebView* wkWebView = nil;
 
 - (instancetype)initWithFrame:(CGRect)frame
 {
@@ -72,7 +76,7 @@ NSString* sessionKey = nil;
         WKWebViewConfiguration* configuration = [[WKWebViewConfiguration alloc] init];
         configuration.userContentController = userContentController;
 
-        WKWebView* wkWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
+        wkWebView = [[WKWebView alloc] initWithFrame:frame configuration:configuration];
 
         wkWebView.UIDelegate = self.uiDelegate;
 
@@ -300,15 +304,11 @@ NSString* sessionKey = nil;
     [_webServerOptions setObject:[NSNumber numberWithBool:YES]
                           forKey:GCDWebServerOption_BindToLocalhost];
 
-    // If a fixed port is passed in, use that one, otherwise use 12344.
-    // If the port is taken though, look for a free port by adding 1 to the port until we find one.
-    int httpPort = 12344;
-
     // first we check any passed-in variable during plugin install (which is copied to plist, see plugin.xml)
-    NSNumber *plistPort = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"WKWebViewPluginEmbeddedServerPort"];
-    if (plistPort != nil) {
-      httpPort = [plistPort intValue];
-    }
+    //NSNumber *plistPort = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"WKWebViewPluginEmbeddedServerPort"];
+    //if (plistPort != nil) {
+    //  httpPort = [plistPort intValue];
+    //}
 
     // now check if it was set in config.xml - this one wins if set.
     // (note that the settings can be in any casing, but they are stored in lowercase)
@@ -318,7 +318,7 @@ NSString* sessionKey = nil;
 
     _webServer.delegate = (id<GCDWebServerDelegate>)self;
     do {
-        [_webServerOptions setObject:[NSNumber numberWithInteger:httpPort++]
+        [_webServerOptions setObject:[NSNumber numberWithInteger:++httpPort]
                               forKey:GCDWebServerOption_Port];
     } while(![_webServer startWithOptions:_webServerOptions error:&error]);
 
@@ -513,6 +513,15 @@ NSString* sessionKey = nil;
 - (void) webView: (WKWebView *) webView decidePolicyForNavigationAction: (WKNavigationAction*) navigationAction decisionHandler: (void (^)(WKNavigationActionPolicy)) decisionHandler
 {
     NSURL* url = [navigationAction.request URL];
+    NSString* localAddress = [NSString stringWithFormat:@"http://localhost:%d/index.html", httpPort];
+    if([url.absoluteString containsString:localAddress]) {
+        return decisionHandler(YES);
+    }
+    if([url.path containsString:@"redirect.html"]) {
+        url = [NSURL URLWithString:localAddress];
+        [wkWebView loadRequest:[NSURLRequest requestWithURL:url]];
+        return decisionHandler(NO);
+    }
     CDVViewController* vc = (CDVViewController*)self.viewController;
     
     /*
