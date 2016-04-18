@@ -296,10 +296,10 @@ WKWebView* wkWebView = nil;
                           forKey:GCDWebServerOption_BindToLocalhost];
 
     // first we check any passed-in variable during plugin install (which is copied to plist, see plugin.xml)
-    //NSNumber *plistPort = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"WKWebViewPluginEmbeddedServerPort"];
-    //if (plistPort != nil) {
-    //  httpPort = [plistPort intValue];
-    //}
+    NSNumber *plistPort = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"WKWebViewPluginEmbeddedServerPort"];
+    if (plistPort != nil && [plistPort intValue] != 0) {
+        httpPort = [plistPort intValue];
+    }
 
     // now check if it was set in config.xml - this one wins if set.
     // (note that the settings can be in any casing, but they are stored in lowercase)
@@ -505,7 +505,7 @@ WKWebView* wkWebView = nil;
 {
     NSURL* url = [navigationAction.request URL];
     NSString* localAddress = [NSString stringWithFormat:@"http://localhost:%d/%@", httpPort, StartUrlConstant];
-    if([url.absoluteString isEqualToString:localAddress]) {
+    if([url.absoluteString hasPrefix:localAddress]) {
         return decisionHandler(YES);
     }
     // redirect when we load the start page
