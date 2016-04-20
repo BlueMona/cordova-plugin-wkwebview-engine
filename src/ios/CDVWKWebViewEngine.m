@@ -207,7 +207,8 @@ WKWebView* wkWebView = nil;
                 pathRegex: [NSString stringWithFormat:@"^%@.*", path]
                 requestClass:[GCDWebServerRequest class]
                 processBlock:^GCDWebServerResponse *(GCDWebServerRequest* request) {
-                  
+                  //only checking the cookie for user files
+                  //if(![self checkSessionKey:request]) return [self accessForbidden];
                   NSString *fileLocation = request.URL.path;
                   
                   if ([fileLocation hasPrefix:path]) {
@@ -237,7 +238,7 @@ WKWebView* wkWebView = nil;
                      requestClass:[GCDWebServerRequest class]
                      processBlock:^GCDWebServerResponse *(GCDWebServerRequest* request) {
                        /* testing for our session key */
-                       // if(![self checkSessionKey:request]) return [self accessForbidden];
+                       if(![self checkSessionKey:request]) return [self accessForbidden];
 
                        NSString *fileLocation = request.URL.path;
 
@@ -308,6 +309,8 @@ WKWebView* wkWebView = nil;
     //}
 
     _webServer.delegate = (id<GCDWebServerDelegate>)self;
+    // we increment port before each try
+    httpPort--;
     do {
         [_webServerOptions setObject:[NSNumber numberWithInteger:++httpPort]
                               forKey:GCDWebServerOption_Port];
@@ -511,7 +514,12 @@ WKWebView* wkWebView = nil;
     // redirect when we load the start page
     if([url.path containsString:StartUrlConstant]) {
         url = [NSURL URLWithString:localAddress];
-        [wkWebView loadRequest:[NSURLRequest requestWithURL:url]];
+        NSMutableURLRequest* appReq = [NSMutableURLRequest
+            requestWithURL:url
+            cachePolicy:NSURLRequestUseProtocolCachePolicy
+            timeoutInterval:20.0];
+        [appReq addValue:sessionKey forHTTPHeaderField:SessionHeader];
+        [wkWebView loadRequest:appReq];
         return decisionHandler(NO);
     }
     CDVViewController* vc = (CDVViewController*)self.viewController;
