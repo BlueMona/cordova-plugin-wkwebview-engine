@@ -494,6 +494,11 @@ WKWebView* wkWebView = nil;
     }
 }
 
+- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView
+{
+    [webView reload];
+}
+
 - (BOOL)defaultResourcePolicyForURL:(NSURL*)url
 {
     // all file:// urls are allowed
