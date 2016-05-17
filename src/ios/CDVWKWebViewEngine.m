@@ -56,6 +56,9 @@ NSString* sessionKey = nil;
 // If the port is taken though, look for a free port by adding 1 to the port until we find one.
 int httpPort = 12344;
 WKWebView* wkWebView = nil;
+NSTimer* _crashRecoveryTimer;
+BOOL _crashRecoveryActive = false;
+
 
 - (instancetype)initWithFrame:(CGRect)frame
 {
@@ -85,6 +88,12 @@ WKWebView* wkWebView = nil;
       
 
         NSLog(@"Using WKWebView");
+        
+        if(_crashRecoveryTimer != nil) {
+            _crashRecoveryTimer = nil;
+            [_crashRecoveryTimer invalidate];
+        }
+        _crashRecoveryTimer = [NSTimer scheduledTimerWithTimeInterval:5 target:self selector:@selector(recoverFromCrash)  userInfo:nil repeats:YES];
     }
 
     return self;
@@ -398,6 +407,32 @@ WKWebView* wkWebView = nil;
     return _engineWebView;
 }
 
+
+- (void)recoverFromCrash
+{
+    // When an empty title is returned, WkWebView has crashed
+    NSString* title = wkWebView.title;
+    if ((title == nil) || [title isEqualToString:@""]) {
+        if (_crashRecoveryActive) {
+            NSLog(@"WkWebView crash detected, recovering... ");
+            UIApplicationState state = [[UIApplication sharedApplication] applicationState];
+            if (state == UIApplicationStateBackground || state == UIApplicationStateInactive)
+            {
+                NSLog(@"Application is in the background, all is normal");
+                return;
+            }
+            NSLog(@"Trying to restart the view");
+            _crashRecoveryActive = false;
+            [wkWebView reload];
+        }
+    } else {
+
+        // Once the title has been reported back as valid, activate crash recovery
+        _crashRecoveryActive = true;
+    }
+}
+
+
 #pragma mark WKScriptMessageHandler implementation
 
 - (void)userContentController:(WKUserContentController*)userContentController didReceiveScriptMessage:(WKScriptMessage*)message
@@ -438,7 +473,7 @@ WKWebView* wkWebView = nil;
 
 - (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView
 {
-    [webView reload];
+    [wkWebView reload];
 }
 
 - (void)webView:(WKWebView*)webView didStartProvisionalNavigation:(WKNavigation*)navigation
