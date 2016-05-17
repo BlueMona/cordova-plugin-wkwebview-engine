@@ -1,6 +1,6 @@
 {
   "name": "com.peerio.cordova.plugin.wkwebviewserver",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Peerio WkWebView engine fork with built-in HTTP server",
   "repository": {
     "type": "git",
