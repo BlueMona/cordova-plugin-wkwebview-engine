@@ -59,7 +59,6 @@ WKWebView* wkWebView = nil;
 NSTimer* _crashRecoveryTimer;
 BOOL _crashRecoveryActive = false;
 
-
 - (instancetype)initWithFrame:(CGRect)frame
 {
     self = [super init];
@@ -93,7 +92,7 @@ BOOL _crashRecoveryActive = false;
             _crashRecoveryTimer = nil;
             [_crashRecoveryTimer invalidate];
         }
-        _crashRecoveryTimer = [NSTimer scheduledTimerWithTimeInterval:5 target:self selector:@selector(recoverFromCrash)  userInfo:nil repeats:YES];
+        _crashRecoveryTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 target:self selector:@selector(recoverFromCrash)  userInfo:nil repeats:YES];
     }
 
     return self;
@@ -407,6 +406,27 @@ BOOL _crashRecoveryActive = false;
     return _engineWebView;
 }
 
+- (NSString*) getLocalAddress
+{
+    return [NSString stringWithFormat:@"http://localhost:%d/%@", httpPort, StartUrlConstant];
+}
+- (void) navigateToStart
+{
+    NSString* localAddress = [self getLocalAddress];
+    NSURL* url = [NSURL URLWithString:localAddress];
+    NSMutableURLRequest* appReq = [NSMutableURLRequest
+        requestWithURL:url
+        cachePolicy:NSURLRequestUseProtocolCachePolicy
+        timeoutInterval:20.0];
+    [appReq addValue:sessionKey forHTTPHeaderField:SessionHeader];
+    [wkWebView loadRequest:appReq];
+}
+
+- (void)reloadWebView
+{
+    NSLog(@"Reloading");
+    [self navigateToStart];
+}
 
 - (void)recoverFromCrash
 {
@@ -414,16 +434,17 @@ BOOL _crashRecoveryActive = false;
     NSString* title = wkWebView.title;
     if ((title == nil) || [title isEqualToString:@""]) {
         if (_crashRecoveryActive) {
-            NSLog(@"WkWebView crash detected, recovering... ");
             UIApplicationState state = [[UIApplication sharedApplication] applicationState];
-            if (state == UIApplicationStateBackground || state == UIApplicationStateInactive)
+            if (state != UIApplicationStateActive)
             {
-                NSLog(@"Application is in the background, all is normal");
                 return;
             }
+            NSLog(@"WkWebView crash detected, recovering... ");
+            
             NSLog(@"Trying to restart the view");
             _crashRecoveryActive = false;
-            [wkWebView reload];
+            // launching in a timer to enable the gcdwebserver to recover
+            [NSTimer scheduledTimerWithTimeInterval:1 target:self selector:@selector(reloadWebView)  userInfo:nil repeats:NO];
         }
     } else {
 
@@ -473,7 +494,9 @@ BOOL _crashRecoveryActive = false;
 
 - (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView
 {
-    [wkWebView reload];
+    NSLog(@"WKNavigation delegate process did terminate fired");
+    //NSLog(@"%hhd", [_webServer isRunning]);
+    //[wkWebView reload];
 }
 
 - (void)webView:(WKWebView*)webView didStartProvisionalNavigation:(WKNavigation*)navigation
@@ -517,8 +540,8 @@ BOOL _crashRecoveryActive = false;
 
 - (void) webView: (WKWebView *) webView decidePolicyForNavigationAction: (WKNavigationAction*) navigationAction decisionHandler: (void (^)(WKNavigationActionPolicy)) decisionHandler
 {
+    NSString* localAddress = [self getLocalAddress];
     NSURL* url = [navigationAction.request URL];
-    NSString* localAddress = [NSString stringWithFormat:@"http://localhost:%d/%@", httpPort, StartUrlConstant];
     if([url.absoluteString hasPrefix:localAddress]) {
         return decisionHandler(YES);
     }
